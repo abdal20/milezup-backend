@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const Booking = require('../models/Booking');
 const Car = require('../models/Car');
+const User = require('../models/User');
 const auth = require('../middleware/auth');
 const moment = require('moment');
 const router = express.Router();
