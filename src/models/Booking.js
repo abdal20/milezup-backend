@@ -52,6 +52,15 @@ const bookingSchema = new mongoose.Schema({
     required: [true, 'Return location is required']
   },
   specialRequests: String,
+  isGuestBooking: {
+    type: Boolean,
+    default: false
+  },
+  guestInfo: {
+    name: String,
+    email: String,
+    phone: String
+  },
   createdAt: {
     type: Date,
     default: Date.now

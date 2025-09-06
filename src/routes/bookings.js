@@ -196,6 +196,153 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
+// @route   POST /api/bookings/guest
+// @desc    Create guest booking (no authentication required)
+// @access  Public
+router.post('/guest', [
+  body('car').notEmpty().withMessage('Car ID is required'),
+  body('startDate').isISO8601().withMessage('Start date must be a valid date'),
+  body('endDate').isISO8601().withMessage('End date must be a valid date'),
+  body('pickupLocation').notEmpty().withMessage('Pickup location is required'),
+  body('returnLocation').notEmpty().withMessage('Return location is required'),
+  body('guestInfo.name').notEmpty().withMessage('Guest name is required'),
+  body('guestInfo.email').isEmail().withMessage('Valid email is required'),
+  body('guestInfo.phone').notEmpty().withMessage('Phone number is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { 
+      car: carId, 
+      startDate, 
+      endDate, 
+      pickupLocation, 
+      returnLocation, 
+      specialRequests,
+      guestInfo 
+    } = req.body;
+
+    // Validate dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const now = new Date();
+
+    if (start <= now) {
+      return res.status(400).json({
+        success: false,
+        message: 'Start date must be in the future'
+      });
+    }
+
+    if (end <= start) {
+      return res.status(400).json({
+        success: false,
+        message: 'End date must be after start date'
+      });
+    }
+
+    // Check if car exists and is available
+    const car = await Car.findById(carId);
+    if (!car) {
+      return res.status(404).json({
+        success: false,
+        message: 'Car not found'
+      });
+    }
+
+    if (!car.isAvailable) {
+      return res.status(400).json({
+        success: false,
+        message: 'Car is not available'
+      });
+    }
+
+    // Check for conflicting bookings
+    const conflictingBookings = await Booking.find({
+      car: carId,
+      status: { $in: ['confirmed', 'active', 'pending'] },
+      $or: [
+        {
+          startDate: { $lte: end },
+          endDate: { $gte: start }
+        }
+      ]
+    });
+
+    if (conflictingBookings.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Car is not available for the selected dates'
+      });
+    }
+
+    // Calculate total amount
+    const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 3600 * 24));
+    const totalAmount = totalDays * car.pricePerDay;
+
+    // Create or find guest user
+    let guestUser = await User.findOne({ email: guestInfo.email, isGuest: true });
+    
+    if (!guestUser) {
+      guestUser = await User.create({
+        name: guestInfo.name,
+        email: guestInfo.email,
+        phone: guestInfo.phone,
+        role: 'guest',
+        isGuest: true
+      });
+    } else {
+      // Update guest info if user exists
+      guestUser.name = guestInfo.name;
+      guestUser.phone = guestInfo.phone;
+      await guestUser.save();
+    }
+
+    // Create booking
+    const booking = await Booking.create({
+      user: guestUser._id,
+      car: carId,
+      startDate: start,
+      endDate: end,
+      totalDays,
+      totalAmount,
+      pickupLocation,
+      returnLocation,
+      specialRequests,
+      status: 'pending',
+      isGuestBooking: true,
+      guestInfo: {
+        name: guestInfo.name,
+        email: guestInfo.email,
+        phone: guestInfo.phone
+      }
+    });
+
+    // Populate car details
+    await booking.populate('car', 'name brand model images pricePerDay category');
+
+    res.status(201).json({
+      success: true,
+      message: 'Guest booking created successfully! We will contact you shortly to confirm your reservation.',
+      data: booking
+    });
+  } catch (error) {
+    console.error('Guest booking error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
 // @route   PUT /api/bookings/:id/cancel
 // @desc    Cancel booking
 //
